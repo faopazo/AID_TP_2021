@@ -1,0 +1,753 @@
+---
+title: "Trabajo Práctico de Análisis Inteligente de Datos"
+author: "F. Ayelén Opazo"
+date: "9/8/2021"
+output: html_document
+---
+
+
+Librerias
+
+```{r}
+library(readr)
+library(ggplot2) 
+library(gridExtra) 
+#install.packages("fastDummies")
+library(fastDummies)
+library(dplyr)
+library(MASS)
+library(reshape2) 
+library(knitr)
+library(mvnormtest)
+library(DescTools)
+library(klaR)
+library(caret)
+library(e1071)
+library(cluster)
+library(pracma)
+library(ggbiplot)
+library(biotools)
+#install.packages("mosaic")
+library(mosaic)
+```
+
+
+
+Levantamos el dataset a utilizar y observamos su estructura
+
+```{r}
+df<- read.csv('turnover.csv')
+head(df)
+```
+
+
+
+################################# ANÁLISIS EXPLORATORIO ########################################
+
+
+```{r}
+str(df)
+```
+
+```{r}
+summary(df)
+```
+```{r} 
+apply(df, 2, sd) #desvío
+```
+
+
+
+Vemos si hay faltantes (No se observan NA)
+
+```{r}
+sum(is.na(df))
+```
+
+
+
+Distribución de variables categóricas 
+
+```{r}
+c1<- ggplot(data = df, aes(x = work_accident)) + 
+  geom_bar(position = "identity", alpha = 0.7, col='black', fill='red')
+c2 <- ggplot(data = df, aes(x = promotion)) + 
+  geom_bar(position = "identity", alpha = 0.7, col='black', fill='red') 
+c3 <- ggplot(data = df, aes(x = department)) + 
+  geom_bar(position = "identity", alpha = 0.7,  col='black', fill='red') 
+c4 <- ggplot(data = df, aes(x = salary)) + 
+  geom_bar(position = "identity", alpha = 0.7,  col='black', fill='red') 
+c5 <- ggplot(data = df, aes(x = churn)) + 
+  geom_bar(position = "identity", alpha = 0.7,  col='black', fill='red') 
+
+grid.arrange(c1, c2, c3, c4, c5)
+```
+
+
+
+Distribución de variables numéricas 
+
+```{r}
+n1<- ggplot(data = df, aes(x = satisfaction)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black', fill='green')
+n2 <- ggplot(data = df, aes(x = evaluation)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black', fill='green') 
+n3 <- ggplot(data = df, aes(x = number_of_projects)) + 
+  geom_histogram(position = "identity", alpha = 0.5,  col='black', fill='green') 
+n4 <- ggplot(data = df, aes(x = average_montly_hours)) + 
+  geom_histogram(position = "identity", alpha = 0.5,  col='black', fill='green') 
+n5 <- ggplot(data = df, aes(x = time_spend_company)) + 
+  geom_histogram(position = "identity", alpha = 0.5,  col='black', fill='green') 
+
+grid.arrange(n1, n2, n3, n4, n5)
+```
+
+```{r echo=TRUE}
+par(mfcol = c(1,5))
+    for (k in 1:5){
+      boxplot(df[k],main = names(df[k]))
+      grid()
+    }
+```
+
+
+
+Observamos la relación de clases (variable target: "churn")
+
+```{r}
+round((table(df$churn, dnn=c("Rotación"))/14999)*100,2)
+```
+
+
+Para variables categóricas y discretas hacemos tablas de contingencia (porcentuales) y test de independencia (los resultados no son concluyentes debido a la alta cantidad de observaciones)
+
+```{r}
+#categóricas
+tc.work_accident = round((table(df$work_accident, df$churn, dnn= c("work accident","churn"))/14999)*100, 2)
+tc.work_accident
+chisq.test(tc.work_accident)
+
+tc.promotion = round((table(df$promotion, df$churn, dnn= c("promotion","churn"))/14999)*100, 2)
+tc.promotion
+chisq.test(tc.promotion)
+
+tc.department=round((table(df$department, df$churn, dnn= c("department","churn"))/14999)*100, 2)
+tc.department
+chisq.test(tc.department)
+
+tc.salary = round((table(df$salary, df$churn, dnn = c("salary","churn"))/14999)*100, 2)
+tc.salary
+chisq.test(tc.salary)
+
+#discretas
+tc.projects= round((table(df$number_of_projects, df$churn, dnn = c("number of projects","churn"))/14999)*100, 2)
+tc.projects
+chisq.test(tc.projects)
+
+tc.time= round((table(df$time_spend_company, df$churn, dnn = c("time spend company","churn"))/14999)*100, 2)
+tc.time
+chisq.test(tc.time)
+```
+
+
+Vemos qué variables están más correlacionadas con el evento de rotación (churn)
+-utilizo el método spearman ya que no se observa distribución normal de los datos-
+
+```{r}
+df_dum = dummy_cols(df, select_columns=c("department"), remove_first_dummy=FALSE)
+df_dum = dummy_cols(df_dum, select_columns=c("salary"), remove_first_dummy=FALSE)
+
+df_num<- df_dum[,-c(9:10)] #quitamos "department" y "salary"
+
+round(cor(df_num),2)
+```
+
+
+
+Observamos estas relaciones gráficamente
+
+```{r}
+df$churn<- as.factor(df$churn)
+c1<- ggplot(data = df, aes(x = work_accident, fill = churn)) + 
+  geom_bar(position = "identity", alpha = 0.5, col='black')
+c2 <- ggplot(data = df, aes(x = promotion, fill = churn)) + 
+  geom_bar(position = "identity", alpha = 0.5, col='black') 
+c3 <- ggplot(data = df, aes(x = department, fill = churn)) + 
+  geom_bar(position = "identity", alpha = 0.5, col='black') 
+c4 <- ggplot(data = df, aes(x = salary, fill = churn)) + 
+  geom_bar(position = "identity", alpha = 0.5, col='black') 
+
+grid.arrange(c1, c2, c3, c4)
+```
+
+
+```{r}
+n1<- ggplot(data = df, aes(x = satisfaction, fill = churn)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black')
+n2 <- ggplot(data = df, aes(x = evaluation, fill = churn)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black') 
+n3 <- ggplot(data = df, aes(x = number_of_projects, fill = churn)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black') 
+n4 <- ggplot(data = df, aes(x = average_montly_hours, fill = churn)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black') 
+n5 <- ggplot(data = df, aes(x = time_spend_company, fill = churn)) + 
+  geom_histogram(position = "identity", alpha = 0.5, col='black') 
+
+grid.arrange(n1, n2, n3, n4, n5)
+```
+
+```{r}
+n1<- ggplot(data = df, aes(x = satisfaction, y = churn)) + 
+  geom_point(position = "identity", alpha = 0.5, col='green')
+n2 <- ggplot(data = df, aes(x = evaluation, y = churn)) + 
+  geom_point(position = "identity", alpha = 0.5, col='green') 
+n3 <- ggplot(data = df, aes(x = number_of_projects, y = churn)) + 
+  geom_point(position = "identity", alpha = 0.5, col='green') 
+n4 <- ggplot(data = df, aes(x = average_montly_hours, y = churn)) + 
+  geom_point(position = "identity", alpha = 0.5, col='green') 
+n5 <- ggplot(data = df, aes(x = time_spend_company, y = churn)) + 
+  geom_point(position = "identity", alpha = 0.5,  col='green') 
+
+grid.arrange(n1, n2, n3, n4, n5)
+```
+
+
+ACP sobre variables numéricas
+
+```{r echo=TRUE}
+datos.pc = prcomp(df[,1:5],scale = TRUE)
+
+ggbiplot(datos.pc, obs.scale=0.01 ,var.scale=1,alpha=0)
+ggbiplot(datos.pc, obs.scale=0.01 ,var.scale=1,alpha=0.5,groups=factor(df$churn)) +
+  scale_color_manual(name="Rotación", values=c("darkgreen","red"),labels=c("no","si")) +  
+theme(legend.direction ="horizontal", legend.position = "top")
+```
+
+
+
+
+###################### CAPÍTULO 1: MODELO DE PREDICCIÓN SUPERVISADO ############################
+
+Para los modelos de predicción se utilizaran las variables numéricas y la clase (6 v. en total)
+
+
+Más allá del análisis exploratorio evaluamos en test supuestos de normalidad y homocedasticidad (como tenemos 14999 observaciones es muy probable que se rechacen ambos supuestos)
+
+
+Vemos si se rechaza o no normalidad de las variables numéricas #Permite hasta 5000 registros
+
+```{r echo=TRUE,message=FALSE}
+df_num<- df[, -c(6,8,9,10)] #sacamos las variables categóricas
+datos_tidy <- melt(df_num, value.name = "valor") 
+kable(datos_tidy %>% group_by(churn, variable) %>% summarise(p_value_Shapiro.test = shapiro.test(valor[0:5000])$p.value)) 
+```
+
+
+
+Comparamos las medias de las clases a simple vista
+
+```{r}
+df_num1= df_num[df_num$churn==1,]
+df_num0= df_num[df_num$churn==0,]
+
+summary(df_num0) #los que no rotaron
+```
+```{r}
+summary(df_num1) #los que rotaron
+```
+
+
+
+Analizamos normalidad multivariada - Con esta evidencia rechazaríamos normalidad multivariada
+
+```{r}
+mshapiro.test(t(df_num[0:5000,-6])) #primeros 5000 registros
+```
+
+
+<h4>Verificamos el supuesto de normalidad multivariada por grupo y homoscedasticidad multivariada.</h4> 
+
+```{r echo=TRUE}
+df_num1= df_num[df_num$churn==1,]
+df_num1= df_num1[0:5000,]
+#mshapiro.test(t(df_num1[,-6]))
+
+df_num0= df_num[df_num$churn==0,]
+df_num0= df_num0[0:5000,]
+mshapiro.test(t(df_num0[,-6]))
+```
+
+
+Aunque no se cumple la normalidad multivariada en ningún grupo, continuamos.
+
+<br>
+<h4>Analizamos igualdad de matrices de varianzas y covarianzas:</h4>
+
+```{r echo=TRUE}
+boxM(data = df_num[, 1:5], grouping = df_num[, 6])
+```
+
+
+
+Análisis discriminante lineal (pese a que no se cumplen los supuestos)
+
+```{r echo=TRUE}
+modelo=NULL
+pred_tr=NULL
+pred_te=NULL
+set.seed(1)
+#escalamiento de datos
+datos_escalados = as.data.frame(scale(df_num[,-6]))
+datos_escalados$churn = df_num$churn
+
+#separo en training y test
+dt = sort(sample(nrow(datos_escalados), nrow(datos_escalados)*.7))
+datos_tr<-datos_escalados[dt,]
+datos_te<-datos_escalados[-dt,]
+```
+
+```{r echo=TRUE}
+formula_regresoras = formula(churn~.)
+modelo$lda <- lda(formula_regresoras,datos_tr)
+
+pred_tr$lda <- predict(modelo$lda,datos_tr)
+pred_te$lda <- predict(modelo$lda,datos_te)
+table(datos_tr$churn,pred_tr$lda$class, dnn = c("Rotación real","Rotación predicha"))
+table(datos_te$churn,pred_te$lda$class, dnn = c("Rotación real","Rotación predicha"))
+
+```
+
+```{r}
+round(modelo$lda$scaling,2)
+```
+
+
+```{r}
+#train
+umbral = 0.3
+clase2 = ifelse(pred_tr$lda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_tr$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+
+#Recall = sum(predict & true) / sum(true)
+```
+
+```{r echo=TRUE}
+#test
+umbral = 0.3
+clase2 = ifelse(pred_te$lda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_te$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+```{r}
+mosaicplot(matriz_confusion, shade = T, colorize = T,
+       gp = gpar(fill = matrix(c("green3", "red2", "red2", "green3"), 2, 2)))
+```
+
+
+Análisis discriminante cuadrático
+
+```{r echo=TRUE}
+#usar datos_tr[-1]
+modelo$qda <- qda(formula_regresoras,datos_tr)
+pred_tr$qda <- predict(modelo$qda,datos_tr)
+pred_te$qda <- predict(modelo$qda,datos_te)
+table(datos_tr$churn,pred_tr$qda$class, dnn = c("Rotación real","Rotación predicha"))
+table(datos_te$churn,pred_te$qda$class, dnn = c("Rotación real","Rotación predicha"))
+```
+```{r}
+#train
+umbral = 0.3
+clase2 = ifelse(pred_tr$qda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_tr$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+
+```{r echo=TRUE}
+#test
+umbral = 0.3
+clase2 = ifelse(pred_te$qda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_te$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+```{r}
+mosaicplot(matriz_confusion, shade = T, colorize = T,
+       gp = gpar(fill = matrix(c("green3", "red2", "red2", "green3"), 2, 2)))
+```
+
+
+Análisis discriminante robusto
+
+```{r echo=TRUE}
+modelo$rda <- rda(formula_regresoras ,datos_tr, gamma=0.3, lambda=0.3)
+                  #gamma=?,lambda=?)
+                  #gamma 0 y lambda 0 -->qda
+                  #gamma 0 y lambda 1 -->lda
+                  #si se omiten --> los optimiza
+round(modelo$rda$regularization,2)
+
+pred_tr$rda <- predict(modelo$rda,datos_tr)
+pred_te$rda <- predict(modelo$rda,datos_te)
+table(datos_tr$churn,pred_tr$rda$class, dnn = c("Rotación real","Rotación predicha"))
+table(datos_te$churn,pred_te$rda$class, dnn = c("Rotación real","Rotación predicha"))
+```
+
+```{r}
+#train
+umbral = 0.3
+clase2 = ifelse(pred_tr$rda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_tr$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+
+```{r echo=TRUE}
+#test
+umbral = 0.3
+clase2 = ifelse(pred_te$rda$posterior[,2]>umbral,1,0) 
+matriz_confusion = table(datos_te$churn, clase2, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+```{r}
+mosaicplot(matriz_confusion, shade = T, colorize = T,
+       gp = gpar(fill = matrix(c("green3", "red2", "red2", "green3"), 2, 2)))
+```
+
+```{r echo=TRUE}
+#accuracy train
+confusion_lda = confusionMatrix(factor(datos_tr$churn), pred_tr$lda$class)
+confusion_qda = confusionMatrix(factor(datos_tr$churn), pred_tr$qda$class)
+confusion_rda = confusionMatrix(factor(datos_tr$churn), pred_tr$rda$class)
+round(confusion_lda$overall[1],2)
+round(confusion_qda$overall[1],2)
+round(confusion_rda$overall[1],2)
+```
+
+
+```{r echo=TRUE}
+#accuracy test
+confusion_lda = confusionMatrix(factor(datos_te$churn), pred_te$lda$class)
+confusion_qda = confusionMatrix(factor(datos_te$churn), pred_te$qda$class)
+confusion_rda = confusionMatrix(factor(datos_te$churn), pred_te$rda$class)
+round(confusion_lda$overall[1],2)
+round(confusion_qda$overall[1],2)
+round(confusion_rda$overall[1],2)
+
+```
+
+
+```{r echo=TRUE}
+#miramos los resultados de cada clasificación en el biplot
+pred_todos=NULL
+pred_todos$lda <- predict(modelo$lda,datos_escalados)
+pred_todos$qda <- predict(modelo$qda,datos_escalados)
+pred_todos$rda <- predict(modelo$rda,datos_escalados)
+
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=1,groups=factor(pred_todos$lda$class)) +
+  scale_color_manual(name="Rotación predicha LDA", values=c("darkblue","salmon"),labels=c("no","si")) + theme(legend.direction ="horizontal", legend.position = "top")
+
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=1,groups=factor(pred_todos$qda$class)) +
+  scale_color_manual(name="Rotación predicha QDA", values=c("darkblue","salmon"),labels=c("no","si")) +  
+theme(legend.direction ="horizontal", legend.position = "top")
+
+ggbiplot(datos.pc, obs.scale=0.1 ,var.scale=1,alpha=1,groups=factor(pred_todos$rda$class)) +
+scale_color_manual(name="Rotación predicha RDA", values=c("darkblue","salmon"),labels=c("no","si")) +
+theme(legend.direction ="horizontal", legend.position = "top")
+
+
+ggbiplot(datos.pc, obs.scale=0.01 ,var.scale=1,alpha=1,groups=factor(df_num$churn)) +
+scale_color_manual(name="Rotación real", values=c("darkblue","salmon"),labels=c("no","si")) +
+theme(legend.direction ="horizontal", legend.position = "top")
+
+```
+
+```{r echo=TRUE}
+ggplot(df_num,aes(satisfaction,time_spend_company,colour=churn))+geom_point()
+```
+
+
+
+Regresión logística
+
+```{r echo=TRUE}
+modelo$lg <- glm(formula_regresoras, datos_tr, family=binomial)
+
+pred_tr$lg  <- predict(modelo$lg,type = "response")
+pred_tr$lg_class = ifelse(pred_tr$lg<0.3,"0","1")   
+matriz_confusion=table(datos_tr$churn, pred_tr$lg_class, dnn = c("Rotación real","Rotación predicha"))
+matriz_confusion
+
+#métricas
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+```
+
+
+```{r}
+mosaicplot(matriz_confusion, shade = T, colorize = T,
+       gp = gpar(fill = matrix(c("green3", "red2", "red2", "green3"), 2, 2)))
+```
+
+```{r echo=TRUE}
+round(modelo$lg$coefficients,2)
+```
+
+
+
+Modelo Support Vector Machine
+
+```{r echo=TRUE}
+modelo_svm=svm(formula_regresoras,data=datos_tr,kernel="linear")
+pred_tr$svm=predict(modelo_svm, datos_tr)
+pred_te$svm=predict(modelo_svm, datos_te)
+table(datos_tr$churn, pred_tr$svm, dnn = c("Clase real", "Clase predicha"))
+table(datos_te$churn, pred_te$svm, dnn = c("Clase real", "Clase predicha"))
+```
+
+```{r}
+#métricas
+matriz_confusion= table(datos_te$churn, pred_te$svm, dnn = c("Clase real", "Clase predicha"))
+matriz_confusion
+accuracy = (matriz_confusion[1,1]+matriz_confusion[2,2])/sum(matriz_confusion)
+precision = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[2,1])
+recall = (matriz_confusion[1,1]+matriz_confusion[2,2])/(matriz_confusion[1,1]+matriz_confusion[2,2] + matriz_confusion[1,2])
+f2_score = (1+2^2)*((precision*recall)/((2^2*precision)+recall))
+print('accuracy')
+round(accuracy,2)
+print('precision')
+round(accuracy,2)
+print('recall')
+round(recall,2)
+print('f2_score')
+round(f2_score,2)
+
+```
+
+
+```{r}
+mosaicplot(matriz_confusion, shade = T, colorize = T,
+       gp = gpar(fill = matrix(c("green3", "red2", "red2", "green3"), 2, 2)))
+```
+
+
+
+
+
+###################### CAPÍTULO 2: MODELO DE PREDICCIÓN NO SUPERVISADO #########################
+
+
+
+Cluster
+
+```{r echo=TRUE}
+datos_para_cluster = df_num[,-6]
+
+cantidad_clusters=3
+
+CL  = kmeans(scale(datos_para_cluster),cantidad_clusters)
+df_num$kmeans = CL$cluster
+```
+
+
+```{r echo=TRUE}
+#en cuales 2 variables me conviene visualizar el cluster?
+ggplot(df_num,aes(x=satisfaction,y=average_montly_hours,color=as.factor(kmeans))) +geom_point()+
+scale_color_manual(name="Cluster kmeans", values=c("orange","cyan","blue","magenta","yellow","black"),
+                     labels=c("grupo 1", "grupo 2","grupo 3","grupo 4","grupo 5","grupo 6")) +  theme(legend.direction ="horizontal", legend.position = "top")
+```
+
+```{r echo=TRUE}
+#conviene en un biplot ya que tengo las flechas de las variables originales
+ggbiplot(datos.pc, obs.scale=1 ,var.scale=1, alpha=0.5,groups = as.factor(df_num$kmeans) )+
+  scale_color_manual(name="Cluster kmeans", values=c("orange","cyan","blue"),
+                     labels=c("grupo 1", "grupo 2","grupo 3")) +  
+theme(legend.direction ="horizontal", legend.position = "top")
+```
+
+```{r}
+#analisis de la cantidad de clusters. Este primer bloque es solo para definir funciones.
+#se define una funcion para calcular metricas que orientan sobre el numero de clusters a elegir para el problema.
+
+metrica = function(datA_esc,kmax,f) {
+  
+  sil = array()
+  sse = array()
+  
+  datA_dist= dist(datA_esc,method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+  for ( i in  2:kmax) {
+    if (strcmp(f,"kmeans")==TRUE) {   #centroide: tipico kmeans
+      CL  = kmeans(datA_esc,centers=i,nstart=50,iter.max = kmax)
+      sse[i]  = CL$tot.withinss 
+      CL_sil = silhouette(CL$cluster, datA_dist)
+      sil[i]  = summary(CL_sil)$avg.width
+        }
+    if (strcmp(f,"pam")==TRUE){       #medoide: ojo porque este metodo tarda muchisimo 
+      CL = pam(x=datA_esc, k=i, diss = F, metric = "euclidean")
+      sse[i]  = CL$objective[1] 
+      sil[i]  = CL$silinfo$avg.width
+      }
+  }
+  sse
+  sil
+  return(data.frame(sse,sil))
+}
+```
+
+```{r echo=TRUE}
+#en este bloque se estudia cuantos clusters convendría generar segun indicadores tipicos -> por ejemplo el "Silhouette"
+kmax = 15
+#2 opciones de escalamiento
+  m1   = metrica(scale(datos_para_cluster),kmax,"kmeans")  #tipica con estimadores de la normal
+  
+  # se define funcion de escalamiento disferente de la tipica normal.
+  #esc01 <- function(x) { (x - min(x)) / (max(x) - min(x))} 
+  #m1   = metrica(apply(datos_para_cluster,2,esc01),kmax,"kmeans") #definida en la funcion esc01
+  
+```
+
+```{r echo=TRUE}
+#graficos de los indicadores de clustering
+par(mfrow=c(2,1))
+plot(2:kmax, m1$sil[2:kmax],col=1,type="b", pch = 19, frame = FALSE, 
+	 xlab="Number of clusters K",
+	 ylab="sil") 
+
+plot(2:kmax, m1$sse[2:kmax],type="b", pch = 19, frame = FALSE, 
+	 xlab="Number of clusters K",
+	 ylab="sse") 
+
+par(mfrow=c(1,1))
+grid()
+```
+
+
+
+Método de cluster jerárquico
+
+```{r echo=TRUE}
+# Matriz de distancias euclídeas 
+mat_dist <- dist(x = datos_para_cluster, method = "euclidean") 
+
+# Dendrogramas (según el tipo de segmentación jerárquica aplicada)  
+hc_complete <- hclust(d = mat_dist, method = "complete") 
+hc_average  <- hclust(d = mat_dist, method = "average")
+hc_single   <- hclust(d = mat_dist, method = "single")
+hc_ward     <- hclust(d = mat_dist, method = "ward.D2")
+
+#calculo del coeficiente de correlacion cofenetico
+cor(x = mat_dist, cophenetic(hc_complete))
+cor(x = mat_dist, cophenetic(hc_average))
+cor(x = mat_dist, cophenetic(hc_single))
+cor(x = mat_dist, cophenetic(hc_ward))
+```
+
+```{r echo=TRUE}
+# construccion de un dendograma usando los resultados de la técnica de Ward
+plot(hc_ward )#no se ve bien si hay muchos datos
+rect.hclust(hc_ward, k=cantidad_clusters, border="red") #
+
+jer_ward<-cutree(hc_ward,k=cantidad_clusters)           #
+df_num$jer_ward=jer_ward
+
+```
+
+```{r echo=TRUE}
+#conviene en un biplot ya que tengo las flechas de las variables originales
+ggbiplot(datos.pc, obs.scale=1 ,var.scale=1, alpha=0.5,groups = as.factor(df_num$jer_ward) )+
+  scale_color_manual(name="Cluster Ward", values=c("orange","cyan","blue"),
+                     labels=c("grupo 1", "grupo 2","grupo 3")) +  
+theme(legend.direction ="horizontal", legend.position = "top")
+```
